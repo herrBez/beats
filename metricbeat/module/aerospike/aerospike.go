@@ -76,6 +76,8 @@ func ParseInfo(info string) map[string]interface{} {
 	for _, keyValueStr := range strings.Split(info, ";") {
 		KeyValArr := strings.Split(keyValueStr, "=")
 		if len(KeyValArr) == 2 {
+			// TODO Delete Me
+			fmt.Printf("%s: %s", KeyValArr[0], KeyValArr[1])
 			result[KeyValArr[0]] = KeyValArr[1]
 		}
 	}

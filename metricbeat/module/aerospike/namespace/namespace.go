@@ -95,7 +95,7 @@ func (m *MetricSet) Fetch(reporter mb.ReporterV2) error {
 				continue
 			}
 
-			data, _ := schema.Apply(aerospike.ParseInfo(info["namespace/"+namespace]))
+			data, _ := schemav7.Apply(aerospike.ParseInfo(info["namespace/"+namespace]))
 			data["name"] = namespace
 			data["node"] = mapstr.M{
 				"host": node.GetHost().String(),

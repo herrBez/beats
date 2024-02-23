@@ -44,7 +44,7 @@ var schema = s.Schema{
 	},
 	"device": s.Object{
 		"available": s.Object{
-			"pct": c.Float("device_available_pct", s.Optional),
+			"pct": c.Float("device_available", s.Optional),
 		},
 		"free": s.Object{
 			"pct": c.Float("device_free_pct", s.Optional),
@@ -81,4 +81,72 @@ var schema = s.Schema{
 		"total":  c.Int("objects"),
 	},
 	"stop_writes": c.Bool("stop_writes"),
+}
+
+// Making sure all critical metrics are available:
+// Read More: https://aerospike.com/docs/reference/metrics
+// Breaking Changes from version 7.0
+// https://aerospike.com/docs/reference/release_notes/server/7.0-server-release-notes
+var schemav7 = s.Schema{
+	"client": s.Object{
+		"delete": s.Object{
+			"error":     c.Int("client_delete_error"),
+			"not_found": c.Int("client_delete_not_found"),
+			"success":   c.Int("client_delete_success"),
+			"timeout":   c.Int("client_delete_timeout"),
+		},
+		"read": s.Object{
+			"error":     c.Int("client_read_error"),
+			"not_found": c.Int("client_read_not_found"),
+			"success":   c.Int("client_read_success"),
+			"timeout":   c.Int("client_read_timeout"),
+		},
+		"write": s.Object{
+			"error":   c.Int("client_write_error"),
+			"success": c.Int("client_write_success"),
+			"timeout": c.Int("client_write_timeout"),
+		},
+	},
+	"device": s.Object{
+		"available": s.Object{
+			"pct": c.Float("data_avail_pct", s.Optional),
+		},
+		"used": s.Object{
+			"bytes": c.Int("data_used_bytes", s.Optional),
+			"pct":   c.Float("data_used_pct", s.Optional),
+		},
+		"total": s.Object{
+			"bytes": c.Int("data_total_bytes", s.Optional),
+		},
+	},
+	"hwm_breached": c.Bool("hwm_breached"),
+	"memory": s.Object{
+		"free": s.Object{
+			"pct": c.Float("memory_free_pct"),
+		},
+		"used": s.Object{
+			"data": s.Object{
+				"bytes": c.Int("data_used_bytes"),
+			},
+			"index": s.Object{
+				"bytes": c.Int("index_used_bytes"),
+			},
+			"sindex": s.Object{
+				"bytes": c.Int("sindex_used_bytes"),
+			},
+			// "total": s.Object{
+			// 	"bytes": c.Int("memory_used_bytes"),
+			// },
+		},
+	},
+	"partitions": s.Object{
+		"unavailable": c.Int("unavailable_partitions"),
+		"dead":        c.Int("dead_partitions"),
+	},
+	"objects": s.Object{
+		"master": c.Int("master_objects"),
+		"total":  c.Int("objects"),
+	},
+	"stop_writes":            c.Bool("stop_writes"),
+	"clock_skew_stop_writes": c.Bool("clock_skew_stop_writes"),
 }

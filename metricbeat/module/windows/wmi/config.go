@@ -30,14 +30,15 @@ import (
 )
 
 type Config struct {
-	IncludeQueries bool          `config:"wmi.include_queries"` // Whether to include the query in the document
-	IncludeNull    bool          `config:"wmi.include_null"`    // Whether to include or not nil properties
-	Host           string        `config:"wmi.host"`            // Remote WMI Host
-	User           string        `config:"wmi.username"`        // Username for the Remote WMI
-	Password       string        `config:"wmi.password"`        // Password for the Remote WMI
-	Namespace      string        `config:"wmi.namespace"`       // Namespace for the queries
-	Queries        []QueryConfig `config:"wmi.queries"`         // List of query definitions
-	Timeout        time.Duration `config:"wmi.timeout"`         // Timeout for the execution of a single Query
+	IncludeQueries     bool          `config:"wmi.include_queries"`      // Whether to include the query in the document
+	IncludeNull        bool          `config:"wmi.include_null"`         // Whether to include or not nil properties
+	IncludeEmptyString bool          `config:"wmi.include_empty_string"` // Whether to include or not empty string properties
+	Host               string        `config:"wmi.host"`                 // Remote WMI Host
+	User               string        `config:"wmi.username"`             // Username for the Remote WMI
+	Password           string        `config:"wmi.password"`             // Password for the Remote WMI
+	Namespace          string        `config:"wmi.namespace"`            // Namespace for the queries
+	Queries            []QueryConfig `config:"wmi.queries"`              // List of query definitions
+	Timeout            time.Duration `config:"wmi.timeout"`              // Timeout for the execution of a single Query
 }
 
 type QueryConfig struct {

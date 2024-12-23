@@ -22,6 +22,7 @@ package wmi
 import (
 	"fmt"
 	"time"
+	"unicode"
 
 	"github.com/elastic/beats/v7/libbeat/common/cfgwarn"
 	"github.com/elastic/beats/v7/metricbeat/mb"
@@ -82,6 +83,20 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 	return m, nil
 }
 
+// This function handles the skip conditions
+func (m *MetricSet) shouldSkipNilOrEmptyValue(fieldValue interface{}) bool {
+	if fieldValue == nil {
+		if !m.config.IncludeNull {
+			return true // Skip if it's nil and IncludeNull is false
+		}
+	} else if stringValue, ok := fieldValue.(string); ok {
+		if len(stringValue) == 0 && !m.config.IncludeEmptyString {
+			return true // Skip if it's an empty string and IncludeEmptyString is false
+		}
+	}
+	return false
+}
+
 // Fetch method implements the data gathering and data conversion to the right
 // format. It publishes the event which is then forwarded to the output. In case
 // of an error set the Error field of mb.Event or simply call report.Error().
@@ -116,6 +131,10 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 
 		defer wmi.CloseAllInstances(rows)
 
+		// We create a conversion table for a group of entries that share
+		// the same schema, to avoid fetching it at every line
+		conversionTable := make(map[string]WMI_EXTRA_CONVERSION)
+
 		for _, instance := range rows {
 			event := mb.Event{
 				MetricSetFields: mapstr.M{
@@ -137,21 +156,63 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 				properties = instance.GetClass().GetPropertiesNames()
 			}
 
+			// The script API of WMI returns string for uint64, sint64, datetime
+			// Link:
+			// As a user, I want to have the right CIM_TYPE in the final object
+
+			// IDEA For fixing type:
+			// 1. store the non-string properties directly in the output
+			// 2. For the string properties, fetch the CIM_Type property
+			// 3. Attempt the conversion
+
 			for _, fieldName := range properties {
 				fieldValue, err := instance.GetProperty(fieldName)
 				if err != nil {
 					logp.Err("Unable to get propery by name: %v", err)
 					continue
 				}
-				// If the user decides to ignore properties with nil values, we skip them
-				if !m.config.IncludeNull && fieldValue == nil {
+
+				if m.shouldSkipNilOrEmptyValue(fieldValue) {
 					continue
 				}
 
-				event.MetricSetFields.Put(fieldName, fieldValue)
+				// The default case
+				finalValue := fieldValue
+
+				// If it's of type string, we attempt to perform some additional conversion
+				if stringValue, ok := fieldValue.(string); ok {
+					isEmptyString := len(stringValue) == 0
+
+					// Heuristic to avoid fetching the raw properties for every string
+					//   If the string is empty, no need to convert the string
+					//   If the string does not end with a digit, it's not an uint64, sint64, datetime
+					if !isEmptyString && unicode.IsDigit(rune(stringValue[len(stringValue)-1])) {
+						// Get the (cached) conversion function from the table
+						convertFun, ok := conversionTable[fieldName]
+						// If it's not found let us fetch it and cache it
+						if !ok {
+							convertFun, err = GetConvertFunction(instance, fieldName)
+							if err != nil {
+								logp.Warn("Cannot get a conversion function for the property %s", fieldName)
+								continue
+							}
+							conversionTable[fieldName] = convertFun
+						}
+
+						// Perform the conversion
+						convertedValue, err := convertFun(stringValue)
+						if err != nil {
+							logp.Warn("Cannot convert %s to the corresonding CIMType: %v", fieldName, err)
+							continue
+						}
+						finalValue = convertedValue
+					}
+				}
+				event.MetricSetFields.Put(fieldName, finalValue)
 			}
 			report.Event(event)
 		}
 	}
+
 	return nil
 }

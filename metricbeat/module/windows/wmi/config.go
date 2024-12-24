@@ -75,8 +75,8 @@ func (qc *QueryConfig) compileQuery() {
 
 	query := wmiquery.NewWmiQueryWithSelectList(qc.Class, qc.Fields, []string{}...)
 	queryStr := query.String()
-	// Concatenating the where clause manually, because the library supports only a subset of where clauses
-	// while we want to leverage all filtering capabilities
+	// Manually constructing the WHERE clause to overcome limitations in the microsoft/wmi library,
+	// which supports only a subset of WHERE clauses. This approach allows us to utilize the full range of filtering capabilities.
 	if qc.Where != "" {
 		queryStr += " WHERE " + qc.Where
 	}

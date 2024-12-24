@@ -22,7 +22,6 @@ package wmi
 import (
 	"fmt"
 	"time"
-	"unicode"
 
 	"github.com/elastic/beats/v7/libbeat/common/cfgwarn"
 	"github.com/elastic/beats/v7/metricbeat/mb"
@@ -101,7 +100,6 @@ func (m *MetricSet) shouldSkipNilOrEmptyValue(fieldValue interface{}) bool {
 // format. It publishes the event which is then forwarded to the output. In case
 // of an error set the Error field of mb.Event or simply call report.Error().
 func (m *MetricSet) Fetch(report mb.ReporterV2) error {
-
 	var err error
 
 	sm := wmi.NewWmiSessionManager()
@@ -133,7 +131,7 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 
 		// We create a conversion table for a group of entries that share
 		// the same schema, to avoid fetching it at every line
-		conversionTable := make(map[string]WMI_EXTRA_CONVERSION)
+		conversionTable := make(map[string]WmiStringConversionFunction)
 
 		for _, instance := range rows {
 			event := mb.Event{
@@ -144,10 +142,6 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 				},
 			}
 
-			if m.config.IncludeQueries {
-				event.MetricSetFields.Put("query", query)
-			}
-
 			// Get only the required properties
 			properties := queryConfig.Fields
 
@@ -156,15 +150,14 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 				properties = instance.GetClass().GetPropertiesNames()
 			}
 
-			// The script API of WMI returns string for uint64, sint64, datetime
-			// Link:
+			// The script API of WMI returns strings for uint64, sint64, datetime
+			// Link: https://learn.microsoft.com/en-us/windows/win32/wmisdk/querying-wmi
 			// As a user, I want to have the right CIM_TYPE in the final object
 
 			// IDEA For fixing type:
-			// 1. store the non-string properties directly in the output
+			// 1. store the non-string properties as their are
 			// 2. For the string properties, fetch the CIM_Type property
 			// 3. Attempt the conversion
-
 			for _, fieldName := range properties {
 				fieldValue, err := instance.GetProperty(fieldName)
 				if err != nil {
@@ -176,37 +169,28 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 					continue
 				}
 
-				// The default case
+				// The default case, we return what we got
 				finalValue := fieldValue
 
-				// If it's of type string, we attempt to perform some additional conversion
-				if stringValue, ok := fieldValue.(string); ok {
-					isEmptyString := len(stringValue) == 0
-
-					// Heuristic to avoid fetching the raw properties for every string
-					//   If the string is empty, no need to convert the string
-					//   If the string does not end with a digit, it's not an uint64, sint64, datetime
-					if !isEmptyString && unicode.IsDigit(rune(stringValue[len(stringValue)-1])) {
-						// Get the (cached) conversion function from the table
-						convertFun, ok := conversionTable[fieldName]
-						// If it's not found let us fetch it and cache it
-						if !ok {
-							convertFun, err = GetConvertFunction(instance, fieldName)
-							if err != nil {
-								logp.Warn("Cannot get a conversion function for the property %s", fieldName)
-								continue
-							}
-							conversionTable[fieldName] = convertFun
-						}
-
-						// Perform the conversion
-						convertedValue, err := convertFun(stringValue)
+				// Some strings requires special conversion
+				if RequiresExtraConversion(fieldValue) {
+					convertFun, ok := conversionTable[fieldName]
+					// If it's not found let us fetch it and cache it
+					if !ok {
+						convertFun, err = GetConvertFunction(instance, fieldName)
 						if err != nil {
-							logp.Warn("Cannot convert %s to the corresonding CIMType: %v", fieldName, err)
+							logp.Warn("Skipping addition of field %s: Unable to retrieve the conversion function: %v", fieldName, err)
 							continue
 						}
-						finalValue = convertedValue
+						conversionTable[fieldName] = convertFun
 					}
+					// Perform the conversion at this point it's safe to cast to string.
+					convertedValue, err := convertFun(fieldValue.(string))
+					if err != nil {
+						logp.Warn("Skipping addition of field %s. Cannot convert: %v", fieldName, err)
+						continue
+					}
+					finalValue = convertedValue
 				}
 				event.MetricSetFields.Put(fieldName, finalValue)
 			}

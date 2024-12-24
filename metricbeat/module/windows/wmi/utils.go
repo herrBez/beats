@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+	"unicode"
 
 	"github.com/elastic/elastic-agent-libs/logp"
 	"github.com/go-ole/go-ole"
@@ -30,13 +31,14 @@ import (
 	wmi "github.com/microsoft/wmi/pkg/wmiinstance"
 )
 
-// Define an interface to allow unit-testing the timing out issues
+// Define an interface to allow unit-testing long-running queries
+// *wmi.wmiSession is an implementation of this interface
 type WmiQueryInterface interface {
 	QueryInstances(query string) ([]*wmi.WmiInstance, error)
 }
 
-// Define a type for performing conversion
-type WMI_EXTRA_CONVERSION func(string) (interface{}, error)
+// Define a function type for performing string conversions
+type WmiStringConversionFunction func(string) (interface{}, error)
 
 func ConvertUint64(v string) (interface{}, error) {
 	return strconv.ParseUint(v, 10, 64)
@@ -55,10 +57,25 @@ func ConvertString(v string) (interface{}, error) {
 	return v, nil
 }
 
+// Function that determines if a given value requires additional conversion
+// This holds true for strings that encode uint64, sint64 and datetime format
+func RequiresExtraConversion(fieldValue interface{}) bool {
+	stringValue, isString := fieldValue.(string)
+	if !isString {
+		return false
+	}
+	isEmptyString := len(stringValue) == 0
+
+	// Heuristic to avoid fetching the raw properties for every string property
+	//   If the string is empty, no need to convert the string
+	//   If the string does not end with a digit, it's not an uint64, sint64, datetime
+	return !isEmptyString && unicode.IsDigit(rune(stringValue[len(stringValue)-1]))
+}
+
 // Given a Property it returns its CIM Type Qualifier
 // https://learn.microsoft.com/en-us/windows/win32/wmisdk/cimtype-qualifier
 // We assume that it is **always** defined for every property to simiplifying
-// the error handling
+// The error handling
 func getPropertyType(property *ole.IDispatch) base.WmiType {
 	rawType := oleutil.MustGetProperty(property, "CIMType")
 
@@ -70,7 +87,16 @@ func getPropertyType(property *ole.IDispatch) base.WmiType {
 	return base.WmiType(value.(int32))
 }
 
-// Function that returns a "raw" Property that has also a Type
+// Returns the "raw" SWbemProperty containing type information for a given field.
+//
+// The microsoft/wmi library does not have a function that given an instance and a name
+// returns the wmi.wmiProperty object. This function mimics the behavior of the `GetSystemProperty`
+// method in the wmi.wmiInstance struct on the Properties_ field
+// https://github.com/microsoft/wmi/blob/v0.25.2/pkg/wmiinstance/WmiInstance.go#L87
+//
+// We are not instantiating a wmi.wmiProperty type because of this issue
+// https://github.com/microsoft/wmi/issues/150
+// Once this issue is resolved, we can eliminate the need for this "getPropertyType" function.
 func getProperty(instance *wmi.WmiInstance, propertyName string) (*ole.IDispatch, error) {
 	// Documentation: https://learn.microsoft.com/en-us/windows/win32/wmisdk/swbemobject-properties-
 	rawResult, err := oleutil.GetProperty(instance.GetIDispatch(), "Properties_")
@@ -80,7 +106,7 @@ func getProperty(instance *wmi.WmiInstance, propertyName string) (*ole.IDispatch
 
 	// SWbemObjectEx.Properties_ returns
 	// an SWbemPropertySet object that contains the collection
-	// of sytem properties for the c class
+	// of properties for the c class
 	sWbemObjectExAsIDispatch := rawResult.ToIDispatch()
 	defer rawResult.Clear()
 
@@ -93,16 +119,15 @@ func getProperty(instance *wmi.WmiInstance, propertyName string) (*ole.IDispatch
 	return sWbemProperty.ToIDispatch(), nil
 }
 
-// Given an instance and a property Name, it returns the conversion function
-func GetConvertFunction(instance *wmi.WmiInstance, propertyName string) (WMI_EXTRA_CONVERSION, error) {
+// Given an instance and a property Name, it returns the appropriate conversion function
+func GetConvertFunction(instance *wmi.WmiInstance, propertyName string) (WmiStringConversionFunction, error) {
 	rawProperty, err := getProperty(instance, propertyName)
 	if err != nil {
 		return nil, err
 	}
-
 	propType := getPropertyType(rawProperty)
 
-	var f WMI_EXTRA_CONVERSION
+	var f WmiStringConversionFunction
 
 	switch propType {
 	case base.WbemCimtypeDatetime:
@@ -111,7 +136,7 @@ func GetConvertFunction(instance *wmi.WmiInstance, propertyName string) (WMI_EXT
 		f = ConvertUint64
 	case base.WbemCimtypeSint64:
 		f = ConvertSint64
-	default: // For all other type we return the identity function
+	default: // For all other types we return the identity function
 		f = ConvertString
 	}
 	return f, err
@@ -140,7 +165,6 @@ func ExecuteGuardedQueryInstances(session WmiQueryInterface, query string, timeo
 				logp.L().Errorf("Help, error %v", err)
 			}
 		}
-
 	}()
 
 	select {

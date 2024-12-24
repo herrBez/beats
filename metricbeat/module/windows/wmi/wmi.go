@@ -70,8 +70,15 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 		return nil, err
 	}
 
-	if config.Timeout == 0*time.Second {
-		config.Timeout = base.Module().Config().Period
+	err = config.ApplyDefaultNamespaceToQueries(config.Namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	config.BuildNamespaceIndex()
+
+	if config.WarningTimeout == 0*time.Second {
+		config.WarningTimeout = base.Module().Config().Period
 	}
 
 	m := &MetricSet{
@@ -100,101 +107,105 @@ func (m *MetricSet) shouldSkipNilOrEmptyValue(fieldValue interface{}) bool {
 // format. It publishes the event which is then forwarded to the output. In case
 // of an error set the Error field of mb.Event or simply call report.Error().
 func (m *MetricSet) Fetch(report mb.ReporterV2) error {
-	var err error
 
 	sm := wmi.NewWmiSessionManager()
 	defer sm.Dispose()
 
-	session, err := sm.GetSession(m.config.Namespace, m.config.Host, "", m.config.User, m.config.Password)
+	// To minimize the number of session creations, we create a session for each
+	// unique namespace
+	for namespace, queries := range m.config.NamespaceQueryIndex {
 
-	if err != nil {
-		return fmt.Errorf("could not initialize session %w", err)
-	}
-	_, err = session.Connect()
-	if err != nil {
-		return fmt.Errorf("could not connect session %w", err)
-	}
-	defer session.Dispose()
-
-	for _, queryConfig := range m.config.Queries {
-
-		query := queryConfig.QueryStr
-
-		rows, err := ExecuteGuardedQueryInstances(session, query, m.config.Timeout)
+		session, err := sm.GetSession(namespace, m.config.Host, "", m.config.User, m.config.Password)
 
 		if err != nil {
-			logp.Warn("Could not execute query %v", err)
-			continue
+			return fmt.Errorf("could not initialize session %w", err)
 		}
+		_, err = session.Connect()
+		if err != nil {
+			return fmt.Errorf("could not connect session %w", err)
+		}
+		defer session.Dispose()
 
-		defer wmi.CloseAllInstances(rows)
+		for _, queryConfig := range queries {
 
-		// We create a conversion table for a group of entries that share
-		// the same schema, to avoid fetching it at every line
-		conversionTable := make(map[string]WmiStringConversionFunction)
+			query := queryConfig.QueryStr
 
-		for _, instance := range rows {
-			event := mb.Event{
-				MetricSetFields: mapstr.M{
-					"class":     queryConfig.Class,
-					"namespace": m.config.Namespace,
-					"host":      m.config.Host,
-				},
+			rows, err := ExecuteGuardedQueryInstances(session, query, m.config.WarningThreshold)
+
+			if err != nil {
+				logp.Warn("Could not execute query %v", err)
+				continue
 			}
 
-			// Get only the required properties
-			properties := queryConfig.Fields
+			defer wmi.CloseAllInstances(rows)
 
-			// If the Fields array is empty we retrieve all fields
-			if len(queryConfig.Fields) == 0 {
-				properties = instance.GetClass().GetPropertiesNames()
-			}
+			// We create a conversion table for a group of entries that share
+			// the same schema, to avoid fetching it at every line
+			conversionTable := make(map[string]WmiStringConversionFunction)
 
-			// The script API of WMI returns strings for uint64, sint64, datetime
-			// Link: https://learn.microsoft.com/en-us/windows/win32/wmisdk/querying-wmi
-			// As a user, I want to have the right CIM_TYPE in the final object
-
-			// IDEA For fixing type:
-			// 1. store the non-string properties as their are
-			// 2. For the string properties, fetch the CIM_Type property
-			// 3. Attempt the conversion
-			for _, fieldName := range properties {
-				fieldValue, err := instance.GetProperty(fieldName)
-				if err != nil {
-					logp.Err("Unable to get propery by name: %v", err)
-					continue
+			for _, instance := range rows {
+				event := mb.Event{
+					MetricSetFields: mapstr.M{
+						"class":     queryConfig.Class,
+						"namespace": m.config.Namespace,
+						"host":      m.config.Host,
+					},
 				}
 
-				if m.shouldSkipNilOrEmptyValue(fieldValue) {
-					continue
+				// Get only the required properties
+				properties := queryConfig.Fields
+
+				// If the Fields array is empty we retrieve all fields
+				if len(queryConfig.Fields) == 0 {
+					properties = instance.GetClass().GetPropertiesNames()
 				}
 
-				// The default case, we return what we got
-				finalValue := fieldValue
+				// The script API of WMI returns strings for uint64, sint64, datetime
+				// Link: https://learn.microsoft.com/en-us/windows/win32/wmisdk/querying-wmi
+				// As a user, I want to have the right CIM_TYPE in the final object
 
-				// Some strings requires special conversion
-				if RequiresExtraConversion(fieldValue) {
-					convertFun, ok := conversionTable[fieldName]
-					// If it's not found let us fetch it and cache it
-					if !ok {
-						convertFun, err = GetConvertFunction(instance, fieldName)
-						if err != nil {
-							logp.Warn("Skipping addition of field %s: Unable to retrieve the conversion function: %v", fieldName, err)
-							continue
-						}
-						conversionTable[fieldName] = convertFun
-					}
-					// Perform the conversion at this point it's safe to cast to string.
-					convertedValue, err := convertFun(fieldValue.(string))
+				// IDEA For fixing type:
+				// 1. store the non-string properties as their are
+				// 2. For the string properties, fetch the CIM_Type property
+				// 3. Attempt the conversion
+				for _, fieldName := range properties {
+					fieldValue, err := instance.GetProperty(fieldName)
 					if err != nil {
-						logp.Warn("Skipping addition of field %s. Cannot convert: %v", fieldName, err)
+						logp.Err("Unable to get propery by name: %v", err)
 						continue
 					}
-					finalValue = convertedValue
+
+					if m.shouldSkipNilOrEmptyValue(fieldValue) {
+						continue
+					}
+
+					// The default case, we return what we got
+					finalValue := fieldValue
+
+					// Some strings requires special conversion
+					if RequiresExtraConversion(fieldValue) {
+						convertFun, ok := conversionTable[fieldName]
+						// If it's not found let us fetch it and cache it
+						if !ok {
+							convertFun, err = GetConvertFunction(instance, fieldName)
+							if err != nil {
+								logp.Warn("Skipping addition of field %s: Unable to retrieve the conversion function: %v", fieldName, err)
+								continue
+							}
+							conversionTable[fieldName] = convertFun
+						}
+						// Perform the conversion at this point it's safe to cast to string.
+						convertedValue, err := convertFun(fieldValue.(string))
+						if err != nil {
+							logp.Warn("Skipping addition of field %s. Cannot convert: %v", fieldName, err)
+							continue
+						}
+						finalValue = convertedValue
+					}
+					event.MetricSetFields.Put(fieldName, finalValue)
 				}
-				event.MetricSetFields.Put(fieldName, finalValue)
+				report.Event(event)
 			}
-			report.Event(event)
 		}
 	}
 

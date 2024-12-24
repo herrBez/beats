@@ -24,28 +24,31 @@ package wmi
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	wmiquery "github.com/microsoft/wmi/pkg/base/query"
 )
 
 type Config struct {
-	IncludeQueries     bool          `config:"wmi.include_queries"`      // Whether to include the query in the document
-	IncludeNull        bool          `config:"wmi.include_null"`         // Whether to include or not nil properties
-	IncludeEmptyString bool          `config:"wmi.include_empty_string"` // Whether to include or not empty string properties
-	Host               string        `config:"wmi.host"`                 // Remote WMI Host
-	User               string        `config:"wmi.username"`             // Username for the Remote WMI
-	Password           string        `config:"wmi.password"`             // Password for the Remote WMI
-	Namespace          string        `config:"wmi.namespace"`            // Namespace for the queries
-	Queries            []QueryConfig `config:"wmi.queries"`              // List of query definitions
-	Timeout            time.Duration `config:"wmi.timeout"`              // Timeout for the execution of a single Query
+	IncludeQueries      bool                     `config:"wmi.include_queries"`      // Whether to include the query in the document
+	IncludeNull         bool                     `config:"wmi.include_null"`         // Whether to include or not nil properties
+	IncludeEmptyString  bool                     `config:"wmi.include_empty_string"` // Whether to include or not empty string properties
+	Host                string                   `config:"wmi.host"`                 // Remote WMI Host
+	User                string                   `config:"wmi.username"`             // Username for the Remote WMI
+	Password            string                   `config:"wmi.password"`             // Password for the Remote WMI
+	Namespace           string                   `config:"wmi.namespace"`            // Default Namespace for the queries
+	Queries             []QueryConfig            `config:"wmi.queries"`              // List of query definitions
+	WarningThreshold    time.Duration            `config:"wmi.warning_threshold"`    // Timeout duration after which we stop waiting for the query result and we log a warning. The query will continue to run in WMI, but we will no longer wait for its completion.
+	NamespaceQueryIndex map[string][]QueryConfig // Internal struct where the query configs are indexed by Namespace
 }
 
 type QueryConfig struct {
-	QueryStr string
-	Class    string   `config:"class"`
-	Fields   []string `config:"fields"`
-	Where    string   `config:"where"`
+	QueryStr  string
+	Class     string   `config:"class"`
+	Fields    []string `config:"fields"`
+	Where     string   `config:"where"`
+	Namespace string   `config:"namespace"`
 }
 
 func NewDefaultConfig() Config {
@@ -80,7 +83,14 @@ func (qc *QueryConfig) compileQuery() {
 	if qc.Where != "" {
 		queryStr += " WHERE " + qc.Where
 	}
+
 	qc.QueryStr = queryStr
+}
+
+func (qc *QueryConfig) applyDefaultNamespace(defaultNamespace string) {
+	if qc.Namespace == "" {
+		qc.Namespace = defaultNamespace
+	}
 }
 
 func (c *Config) CompileQueries() error {
@@ -91,5 +101,33 @@ func (c *Config) CompileQueries() error {
 	for i := range c.Queries {
 		c.Queries[i].compileQuery()
 	}
+
 	return nil
+}
+
+func (c *Config) ApplyDefaultNamespaceToQueries(defaultNamespace string) error {
+	if len(c.Queries) == 0 {
+		return fmt.Errorf("at least a query is needed")
+	}
+
+	for i := range c.Queries {
+		c.Queries[i].applyDefaultNamespace(defaultNamespace)
+	}
+
+	return nil
+}
+
+func (c *Config) BuildNamespaceIndex() {
+	c.NamespaceQueryIndex = make(map[string][]QueryConfig)
+	for _, q := range c.Queries {
+		// WMI namespaces are case-insensitive. We are building a case-insensitive map
+		// to ensure that different variations of the namespace (e.g., "root\\cimv2" and "ROOT\\CIMV2")
+		// are treated as the same and grouped together.
+		namespace := strings.ToLower(q.Namespace)
+		_, ok := c.NamespaceQueryIndex[namespace]
+		if !ok {
+			c.NamespaceQueryIndex[namespace] = []QueryConfig{}
+		}
+		c.NamespaceQueryIndex[namespace] = append(c.NamespaceQueryIndex[namespace], q)
+	}
 }

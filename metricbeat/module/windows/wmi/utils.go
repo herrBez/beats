@@ -143,7 +143,8 @@ func GetConvertFunction(instance *wmi.WmiInstance, propertyName string) (WmiStri
 }
 
 // Wrapper of the session.QueryInstances function that execute a query for at most a timeout
-// Note that the underlying query will continue run
+// Note that the underlying query will continue to run, until the WMI Arbitrator decides
+// https://learn.microsoft.com/en-us/troubleshoot/windows-server/system-management-components/new-wmi-arbitrator-behavior-in-windows-server
 func ExecuteGuardedQueryInstances(session WmiQueryInterface, query string, timeout time.Duration) ([]*wmi.WmiInstance, error) {
 	var rows []*wmi.WmiInstance
 	var err error
@@ -154,22 +155,26 @@ func ExecuteGuardedQueryInstances(session WmiQueryInterface, query string, timeo
 	defer cancel()
 
 	go func() {
+		start_time := time.Now()
 		rows, err = session.QueryInstances(query)
 		if !timedout {
 			done <- err
 		} else {
+			timeSince := time.Since(start_time)
+			baseMessage := fmt.Sprintf("The timed out query '%s' terminated after %s", query, timeSince)
 			// We eventually fetched the documents, let us free them
-			if err != nil {
+			if err == nil {
+				logp.Warn("%s successfully. The result will be ignored", baseMessage)
 				wmi.CloseAllInstances(rows)
 			} else {
-				logp.L().Errorf("Help, error %v", err)
+				logp.Warn("%s with an error %v", baseMessage, err)
 			}
 		}
 	}()
 
 	select {
 	case <-ctx.Done():
-		err = fmt.Errorf("query '%s' exceeded the timeout of %s", query, timeout)
+		err = fmt.Errorf("execution of '%s' exceeded the warning threshold of %s", query, timeout)
 		timedout = true
 		close(done)
 	case <-done:

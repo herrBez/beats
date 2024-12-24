@@ -77,8 +77,8 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 
 	config.BuildNamespaceIndex()
 
-	if config.WarningTimeout == 0*time.Second {
-		config.WarningTimeout = base.Module().Config().Period
+	if config.WarningThreshold == 0*time.Second {
+		config.WarningThreshold = base.Module().Config().Period
 	}
 
 	m := &MetricSet{
@@ -133,7 +133,7 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 			rows, err := ExecuteGuardedQueryInstances(session, query, m.config.WarningThreshold)
 
 			if err != nil {
-				logp.Warn("Could not execute query %v", err)
+				logp.Warn("Could not execute query: %v", err)
 				continue
 			}
 

@@ -194,15 +194,6 @@ func GetConvertFunction(instance *wmi.WmiInstance, propertyName string, logger *
 	return f, err
 }
 
-// Builds a set (map) of property names for quick lookup
-func buildPropertySet(properties []string) map[string]bool {
-	propertySet := make(map[string]bool, len(properties))
-	for _, prop := range properties {
-		propertySet[prop] = true
-	}
-	return propertySet
-}
-
 func errorOnClassDoesNotExist(rows []*wmi.WmiInstance, queryConfig QueryConfig) error {
 	switch len(rows) {
 	case 0:

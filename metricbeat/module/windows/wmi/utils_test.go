@@ -56,77 +56,12 @@ func TestExecuteGuardedQueryInstances(t *testing.T) {
 	assert.Equal(t, err, expectedError, "Expected the returned error to match the expected error")
 }
 
-func Test_RequiresExtraConversion(t *testing.T) {
-	tests := []struct {
-		name          string
-		propertyValue interface{}
-		expected      bool
-		description   string
-	}{
-		{
-			name:          "Valid numeric string - ends with a digit",
-			propertyValue: "12345",
-			expected:      true,
-			description:   "Should require conversion as the string ends with a digit",
-		},
-		{
-			name:          "Empty string",
-			propertyValue: "",
-			expected:      false,
-			description:   "Should not require conversion as the string is empty",
-		},
-		{
-			name:          "Non-numeric string - no digits",
-			propertyValue: "abcdef",
-			expected:      false,
-			description:   "Should not require conversion as the string does not end with a digit",
-		},
-		{
-			name:          "Mixed string - ends with a digit. Let us fetch the type",
-			propertyValue: "abc123",
-			expected:      true,
-			description:   "Should require conversion as the string ends with a digit",
-		},
-		{
-			name:          "String ending with a non-digit",
-			propertyValue: "123abc",
-			expected:      false,
-			description:   "Should not require conversion as the string ends with a non-digit",
-		},
-		{
-			name:          "Nil input",
-			propertyValue: nil,
-			expected:      false,
-			description:   "Should not require conversion as the input is nil",
-		},
-		{
-			name:          "Non-string input",
-			propertyValue: 12345,
-			expected:      false,
-			description:   "Should not require conversion as the input is not a string",
-		},
-		{
-			name:          "Datetime input - requires a conversion",
-			propertyValue: "20240925192747.000000+000",
-			expected:      true,
-			description:   "Should not require conversion as the input is not a string",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := RequiresExtraConversion(tt.propertyValue)
-			assert.Equal(t, tt.expected, result, tt.description)
-		})
-	}
-}
-
 const TEST_DATE_FORMAT string = "2006-01-02T15:04:05.999999-07:00"
 
 func Test_ConversionFunctions(t *testing.T) {
 	tests := []struct {
 		name        string
-		conversion  WmiStringConversionFunction
+		conversion  WmiConversionFunction
 		input       string
 		expected    interface{}
 		expectErr   bool
@@ -195,8 +130,8 @@ func Test_ConversionFunctions(t *testing.T) {
 		},
 		// Test cases for ConvertString
 		{
-			name:        "ConvertString - valid input",
-			conversion:  ConvertString,
+			name:        "ConvertIdentity - valid input",
+			conversion:  ConvertIdentity,
 			input:       "test string",
 			expected:    "test string",
 			expectErr:   false,

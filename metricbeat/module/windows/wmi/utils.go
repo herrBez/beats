@@ -35,10 +35,6 @@ import (
 
 // Utilities related to Type conversion
 
-// WmiStringConversionFunction defines a function type for converting string values
-// into other data types, such as integers or timestamps.
-type WmiStringConversionFunction func(string) (interface{}, error)
-
 type WmiConversionFunction func(interface{}) (interface{}, error)
 
 func ConvertUint64(v interface{}) (interface{}, error) {
@@ -207,21 +203,14 @@ func buildPropertySet(properties []string) map[string]bool {
 	return propertySet
 }
 
-// Fetch schema rows based on class name
-func fetchSchemaRows(session WmiQueryInterface, queryConfig *QueryConfig) ([]*wmi.WmiInstance, error) {
-	query := fmt.Sprintf("SELECT * FROM meta_class WHERE __Class = '%s'", queryConfig.Class)
-	rows, err := session.QueryInstances(query)
-	if err != nil {
-		return nil, fmt.Errorf("Could not execute meta_class query: %v", err)
-	}
-
+func errorOnClassDoesNotExist(rows []*wmi.WmiInstance, queryConfig QueryConfig) error {
 	switch len(rows) {
 	case 0:
-		return nil, fmt.Errorf("Class '%s' not found in namespace '%s'", queryConfig.Class, queryConfig.Namespace)
+		return fmt.Errorf("Class '%s' not found in namespace '%s'", queryConfig.Class, queryConfig.Namespace)
 	case 1:
-		return rows, nil
+		return nil
 	default:
-		return nil, fmt.Errorf("Unexpected case: Metaclass should return only a single entry for a class")
+		return fmt.Errorf("Unexpected case: Metaclass should return only a single entry for the class %s", queryConfig.Class)
 	}
 }
 
@@ -245,16 +234,22 @@ func filterValidProperties(instance *wmi.WmiInstance, properties []string) ([]st
 }
 
 func addSchemaToQueryConfig(session WmiQueryInterface, queryConfig *QueryConfig, logger *logp.Logger) error {
-	// Check if the class does actually exist
-	rows, err := fetchSchemaRows(session, queryConfig)
+	// Fetch the meta class
+	query := fmt.Sprintf("SELECT * FROM meta_class WHERE __Class = '%s'", queryConfig.Class)
+	rows, err := session.QueryInstances(query)
+	if err != nil {
+		return fmt.Errorf("Could not execute meta_class query: %v", err)
+	}
+
+	defer wmi.CloseAllInstances(rows)
+
+	// Double check if the class does exist
+	err = errorOnClassDoesNotExist(rows, *queryConfig)
 	if err != nil {
 		return err
 	}
-	defer wmi.CloseAllInstances(rows)
 
 	instance := rows[0]
-
-	queryConfig.NormalizePropertyArray()
 
 	// Valid Properties contains the properties that are both contained in the
 	// user-provided lists and in the properties of the class
@@ -264,7 +259,7 @@ func addSchemaToQueryConfig(session WmiQueryInterface, queryConfig *QueryConfig,
 		logger.Warnf("We are going to ignore the properties '%s' because '%s' class in namespace '%s' does not contain those properties. Please amend your configuration or check why it's the case", invalidProperties, queryConfig.Class, queryConfig.Namespace)
 	}
 	if len(validProperties) == 0 {
-		return fmt.Errorf("At least a valid property is required to make sense")
+		return fmt.Errorf("All the properties listed  are invalid %v. We are skipping the query", invalidProperties)
 	}
 
 	// Extract schema
@@ -277,7 +272,11 @@ func addSchemaToQueryConfig(session WmiQueryInterface, queryConfig *QueryConfig,
 		schema[property] = convertFunction
 	}
 
-	queryConfig.Properties = validProperties
+	// For the empty array we keep '*'
+	if len(queryConfig.Properties) != 0 {
+		queryConfig.Properties = validProperties
+	}
+
 	queryConfig.Schema = schema
 	queryConfig.compileQuery()
 

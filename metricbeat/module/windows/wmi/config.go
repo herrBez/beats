@@ -102,6 +102,13 @@ func (qc *QueryConfig) applyDefaultNamespace(defaultNamespace string) {
 	}
 }
 
+func (c *Config) NormalizePropertyArray() error {
+	for i := range c.Queries {
+		c.Queries[i].NormalizePropertyArray()
+	}
+	return nil
+}
+
 func (c *Config) CompileQueries() error {
 	if len(c.Queries) == 0 {
 		return fmt.Errorf("at least one query is needed")

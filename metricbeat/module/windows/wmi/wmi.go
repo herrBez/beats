@@ -68,12 +68,20 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 		return nil, err
 	}
 
+	err = config.NormalizePropertyArray()
+	if err != nil {
+		return nil, err
+	}
+
 	// err = config.CompileQueries()
 	// if err != nil {
 	// 	return nil, err
 	// }
 
 	config.BuildNamespaceQueryIndex()
+
+	// Free-up config.Queries that is not needed anymore
+	config.Queries = nil
 
 	if config.WarningThreshold == 0 {
 		config.WarningThreshold = base.Module().Config().Period
@@ -133,7 +141,8 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 
 		for i, _ := range m.config.NamespaceQueryIndex[namespace] {
 
-			// If the query/schema is invalid we simply report the error
+			// If the query/schema is invalid the first time, we don't retry to fetch the schema again
+			// we simply report the error
 			if m.config.NamespaceQueryIndex[namespace][i].Error != nil {
 				m.reportError(report, m.config.NamespaceQueryIndex[namespace][i].Error)
 				continue
@@ -144,7 +153,7 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 				err := addSchemaToQueryConfig(session, &m.config.NamespaceQueryIndex[namespace][i], m.Logger())
 				if err != nil {
 					m.config.NamespaceQueryIndex[namespace][i].Error = err
-					m.reportError(report, m.config.NamespaceQueryIndex[namespace][i].Error)
+					m.reportError(report, err)
 					continue
 				}
 			}
@@ -162,8 +171,8 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 			}
 
 			if len(rows) == 0 {
-				errorMsg := fmt.Sprintf("Namespace %s: The query '%s' did not return any results. While this can be expected in case of a too strict WHERE clause, it may also indicate an invalid query. Ensure the query is correct or check the WMI-Activity Operational Log for further details.", namespace, query)
-				m.reportError(report, fmt.Errorf(errorMsg))
+				errorMsg := fmt.Sprintf("Namespace %s: The query '%s' did not return any results. While this can be expected in case of a too strict WHERE clause, it may also indicate an invalid query. Ensure the query is valid or check the WMI-Activity Operational Log for further details. We currently don't validate the WHERE clause ", namespace, query)
+				m.reportError(report, fmt.Errorf("%s", errorMsg))
 				m.Logger().Warnf(errorMsg)
 			}
 

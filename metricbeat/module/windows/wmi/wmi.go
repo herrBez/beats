@@ -171,7 +171,7 @@ func (m *MetricSet) Fetch(report mb.ReporterV2) error {
 			}
 
 			if len(rows) == 0 {
-				errorMsg := fmt.Sprintf("Namespace %s: The query '%s' did not return any results. While this can be expected in case of a too strict WHERE clause, it may also indicate an invalid query. Ensure the query is valid or check the WMI-Activity Operational Log for further details. We currently don't validate the WHERE clause ", namespace, query)
+				errorMsg := fmt.Sprintf("Namespace %s: The query '%s' did not return any results. While this can be expected in case of a too strict WHERE clause, it may also indicate an invalid query. Ensure the query is valid or check the WMI-Activity Operational Log for further details. We currently don't validate the WHERE clause.", namespace, query)
 				m.reportError(report, fmt.Errorf("%s", errorMsg))
 				m.Logger().Warnf(errorMsg)
 			}

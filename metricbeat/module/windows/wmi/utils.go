@@ -263,7 +263,7 @@ func addSchemaToQueryConfig(session WmiQueryInterface, queryConfig *QueryConfig,
 		schema[property] = convertFunction
 	}
 
-	// For the empty array we keep '*'
+	// For the empty array we keep '*' to have human-readable queries
 	if len(queryConfig.Properties) != 0 {
 		queryConfig.Properties = validProperties
 	}

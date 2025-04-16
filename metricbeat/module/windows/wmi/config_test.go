@@ -32,6 +32,7 @@ func TestNewDefaultConfig(t *testing.T) {
 	assert.False(t, cfg.IncludeQueries, "IncludeQueries should default to false")
 	assert.False(t, cfg.IncludeNullProperties, "IncludeNullProperties should default to false")
 	assert.False(t, cfg.IncludeEmptyStringProperties, "IncludeEmptyStringProperties should default to false")
+	assert.False(t, cfg.IncludeQueryClass, "IncludeQueryClass should default to false")
 	assert.Equal(t, WMIDefaultNamespace, cfg.Namespace, "Namespace should default to WMIDefaultNamespace")
 	assert.Empty(t, cfg.Queries, "Queries should default to an empty slice")
 }

@@ -32,6 +32,7 @@ func TestNewDefaultConfig(t *testing.T) {
 	assert.False(t, cfg.IncludeQueries, "IncludeQueries should default to false")
 	assert.False(t, cfg.IncludeNullProperties, "IncludeNullProperties should default to false")
 	assert.False(t, cfg.IncludeEmptyStringProperties, "IncludeEmptyStringProperties should default to false")
+	assert.False(t, cfg.IncludeQueryClass, "IncludeQueryClass should default to false")
 	assert.Equal(t, WMIDefaultNamespace, cfg.Namespace, "Namespace should default to WMIDefaultNamespace")
 	assert.Empty(t, cfg.Queries, "Queries should default to an empty slice")
 }
@@ -117,13 +118,52 @@ func TestCompileQueries(t *testing.T) {
 	}
 }
 
-// TestQueryCompile ensures individual query compilation works correctly.
-func TestQueryCompile(t *testing.T) {
+func TestNormalizeArray(t *testing.T) {
 	tests := []struct {
 		name                     string
 		queryConfig              QueryConfig
-		expectedQuery            string
 		expectedPropertiesLength int
+	}{
+		{
+			name: "",
+			queryConfig: QueryConfig{
+				Class:      "Dummy",
+				Properties: []string{"*"},
+			},
+			expectedPropertiesLength: 0,
+		},
+		{
+			name: "Wildcard is transformed",
+			queryConfig: QueryConfig{
+				Class:      "Dummy",
+				Properties: []string{"*"},
+			},
+			expectedPropertiesLength: 0,
+		},
+		{
+			name: "Properties listed",
+			queryConfig: QueryConfig{
+				Class:      "Win32_Process",
+				Properties: []string{"Name", "ProcessId"},
+			},
+			expectedPropertiesLength: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.queryConfig.NormalizePropertyArray()
+			assert.Equal(t, tt.expectedPropertiesLength, len(tt.queryConfig.Properties))
+		})
+	}
+}
+
+// TestQueryCompile ensures individual query compilation works correctly.
+func TestQueryCompile(t *testing.T) {
+	tests := []struct {
+		name          string
+		queryConfig   QueryConfig
+		expectedQuery string
 	}{
 		{
 			name: "Simple query with WHERE clause",
@@ -132,8 +172,7 @@ func TestQueryCompile(t *testing.T) {
 				Properties: []string{"Name", "ProcessId"},
 				Where:      "Name = 'notepad.exe'",
 			},
-			expectedQuery:            "SELECT Name,ProcessId FROM Win32_Process WHERE Name = 'notepad.exe'",
-			expectedPropertiesLength: 2,
+			expectedQuery: "SELECT Name,ProcessId FROM Win32_Process WHERE Name = 'notepad.exe'",
 		},
 		{
 			name: "Query with multiple properties and no WHERE clause",
@@ -142,8 +181,7 @@ func TestQueryCompile(t *testing.T) {
 				Properties: []string{"Name", "State", "StartMode"},
 				Where:      "",
 			},
-			expectedQuery:            "SELECT Name,State,StartMode FROM Win32_Service",
-			expectedPropertiesLength: 3,
+			expectedQuery: "SELECT Name,State,StartMode FROM Win32_Service",
 		},
 		{
 			name: "Query with  empty list for properties and Where",
@@ -152,18 +190,16 @@ func TestQueryCompile(t *testing.T) {
 				Properties: []string{},
 				Where:      "Manufacturer = 'Dell'",
 			},
-			expectedQuery:            "SELECT * FROM Win32_ComputerSystem WHERE Manufacturer = 'Dell'",
-			expectedPropertiesLength: 0,
+			expectedQuery: "SELECT * FROM Win32_ComputerSystem WHERE Manufacturer = 'Dell'",
 		},
 		{
-			name: "Query with wildcard (*) and no WHERE clause",
+			name: "Query with empty array and no WHERE clause",
 			queryConfig: QueryConfig{
 				Class:      "Win32_BIOS",
-				Properties: []string{"*"},
+				Properties: []string{},
 				Where:      "",
 			},
-			expectedQuery:            "SELECT * FROM Win32_BIOS",
-			expectedPropertiesLength: 0, // The normalization process make sure that ['*'] and [] are the same case
+			expectedQuery: "SELECT * FROM Win32_BIOS",
 		},
 	}
 
@@ -171,7 +207,6 @@ func TestQueryCompile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.queryConfig.compileQuery()
 			assert.Equal(t, tt.expectedQuery, tt.queryConfig.QueryStr, "QueryStr should match the expected query string")
-			assert.Equal(t, tt.expectedPropertiesLength, len(tt.queryConfig.Properties))
 		})
 	}
 }

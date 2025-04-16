@@ -31,6 +31,7 @@ import (
 )
 
 type Config struct {
+	IncludeQueryClass            bool                     `config:"wmi.include_query_class"`             // Determines if the queried class should be included in the output document (Useful if querying super-classes)
 	IncludeQueries               bool                     `config:"wmi.include_queries"`                 // Determines if the query string should be included in the output document
 	IncludeNullProperties        bool                     `config:"wmi.include_null_properties"`         // Specifies whether to include properties with nil values in the final document
 	IncludeEmptyStringProperties bool                     `config:"wmi.include_empty_string_properties"` // Specifies whether to include properties with empty string values in the final document
@@ -48,15 +49,18 @@ type Config struct {
 }
 
 type QueryConfig struct {
-	QueryStr   string   // The compiled query string generated internally (not user-configurable)
-	Class      string   `config:"class"`      // WMI class to query (used in the FROM clause)
-	Properties []string `config:"properties"` // List of properties to retrieve (used in the SELECT clause). If omitted, all properties of the class are fetched
-	Where      string   `config:"where"`      // Custom WHERE clause to filter query results. The provided string is used directly in the query
-	Namespace  string   `config:"namespace"`  // WMI namespace for the query. This takes precedence over the globally configured namespace
+	QueryStr   string                           // The compiled query string generated internally (not user-configurable)
+	Schema     map[string]WmiConversionFunction // Schema to apply to the fetched information (not user-configurable)
+	Error      error                            // Error occurred during compilation
+	Class      string                           `config:"class"`      // WMI class to query (used in the FROM clause)
+	Properties []string                         `config:"properties"` // List of properties to retrieve (used in the SELECT clause). If omitted, all properties of the class are fetched
+	Where      string                           `config:"where"`      // Custom WHERE clause to filter query results. The provided string is used directly in the query
+	Namespace  string                           `config:"namespace"`  // WMI namespace for the query. This takes precedence over the globally configured namespace
 }
 
 func NewDefaultConfig() Config {
 	return Config{
+		IncludeQueryClass:            false,
 		IncludeQueries:               false,
 		IncludeNullProperties:        false,
 		IncludeEmptyStringProperties: false,
@@ -74,12 +78,15 @@ func (c *Config) ValidateConnectionParameters() error {
 	return nil
 }
 
-func (qc *QueryConfig) compileQuery() {
+func (qc *QueryConfig) NormalizePropertyArray() {
 	// Let us normalize the case where the array is ['*']
 	// To the Empty Array
 	if len(qc.Properties) == 1 && qc.Properties[0] == "*" {
 		qc.Properties = []string{}
 	}
+}
+
+func (qc *QueryConfig) compileQuery() {
 
 	query := wmiquery.NewWmiQueryWithSelectList(qc.Class, qc.Properties, []string{}...)
 	queryStr := query.String()
@@ -95,6 +102,13 @@ func (qc *QueryConfig) applyDefaultNamespace(defaultNamespace string) {
 	if qc.Namespace == "" {
 		qc.Namespace = defaultNamespace
 	}
+}
+
+func (c *Config) NormalizePropertyArray() error {
+	for i := range c.Queries {
+		c.Queries[i].NormalizePropertyArray()
+	}
+	return nil
 }
 
 func (c *Config) CompileQueries() error {

@@ -2,6 +2,7 @@ package node_stats
 
 import (
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 	c "github.com/elastic/beats/v7/libbeat/common/schema/mapstrstr"
 )
 
-var nodeStatsSchema = s.Schema{
+var defaultNodeStatsSchema = s.Schema{
 	"batch_index_complete":                  c.Int("batch_index_complete"),
 	"batch_index_created_buffers":           c.Int("batch_index_created_buffers"),
 	"batch_index_delay":                     c.Int("batch_index_delay"),
@@ -91,6 +92,34 @@ var nodeStatsSchema = s.Schema{
 	"tombstones":                            c.Int("tombstones"),
 	"tree_gc_queue":                         c.Int("tree_gc_queue"),
 	"uptime":                                c.Int("uptime"),
+}
+
+func getSchema(whitelist []string, blacklist []string) schema.Schema {
+
+	var myschema = s.Schema{}
+	if len(whitelist) == 0 {
+		myschema = defaultNodeStatsSchema
+	} else {
+		for k, v := range defaultNodeStatsSchema {
+			for _, pattern := range whitelist {
+				if ok, _ := path.Match(pattern, k); ok {
+					myschema[k] = v
+					break
+				}
+			}
+		}
+	}
+	// Apply blacklist if any
+	for k := range myschema {
+		for _, pattern := range blacklist {
+			if ok, _ := path.Match(pattern, k); ok {
+				delete(myschema, k)
+				break
+			}
+		}
+	}
+
+	return myschema
 }
 
 func convertBatchIndexQueueInternal(queues_raw string) ([]map[string]uint64, error) {

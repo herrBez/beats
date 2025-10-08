@@ -20,6 +20,7 @@ package node_stats
 import (
 	as "github.com/aerospike/aerospike-client-go/v7"
 
+	"github.com/elastic/beats/v7/libbeat/common/schema"
 	"github.com/elastic/beats/v7/metricbeat/mb"
 	"github.com/elastic/elastic-agent-libs/mapstr"
 
@@ -46,13 +47,14 @@ type MetricSet struct {
 	clientPolicy *as.ClientPolicy
 	client       *as.Client
 	infoPolicy   *as.InfoPolicy
+	schema       schema.Schema
 }
 
 // New create a new instance of the MetricSet
 // Part of new is also setting up the configuration by processing additional
 // configuration entries if needed.
 func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
-	config := aerospike.DefaultConfig()
+	config := DefaultNodeStatsConfig()
 	if err := base.Module().UnpackConfig(&config); err != nil {
 		return nil, err
 	}
@@ -62,12 +64,13 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 		return nil, fmt.Errorf("Invalid host format, expected hostname:port: %w", err)
 	}
 
-	clientPolicy, err := aerospike.ParseClientPolicy(config, base.Logger())
+	clientPolicy, err := aerospike.ParseClientPolicy(config.Config, base.Logger())
 	if err != nil {
 		return nil, fmt.Errorf("could not initialize aerospike client policy: %w", err)
 	}
 
 	return &MetricSet{
+		schema:        getSchema(config.Whitelist, config.Blacklist),
 		BaseMetricSet: base,
 		host:          host,
 		clientPolicy:  clientPolicy,
@@ -91,17 +94,17 @@ func (m *MetricSet) Fetch(reporter mb.ReporterV2) error {
 			m.Logger().Error("Failed to retrieve stats from node %s", node.GetName())
 			continue
 		}
+
 		// we need to convert map[string]string to map[string]interface{} to apply the schema
 		convertedStats := make(map[string]interface{}, len(stats))
 		for k, v := range stats {
 			convertedStats[k] = v
 		}
 		// we apply the schema
-		parsed, schemaError := nodeStatsSchema.Apply(convertedStats)
+		parsed, schemaError := m.schema.Apply(convertedStats)
 
 		if schemaError != nil {
-			m.Logger().Error("Failed to apply schema: %s", schemaError)
-			continue
+			return fmt.Errorf("failed to apply schema: %w", schemaError)
 		}
 
 		reporter.Event(mb.Event{

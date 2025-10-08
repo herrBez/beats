@@ -21,6 +21,7 @@ import (
 	as "github.com/aerospike/aerospike-client-go/v7"
 
 	"github.com/elastic/beats/v7/metricbeat/mb"
+	"github.com/elastic/elastic-agent-libs/mapstr"
 
 	"fmt"
 
@@ -103,7 +104,15 @@ func (m *MetricSet) Fetch(reporter mb.ReporterV2) error {
 			continue
 		}
 
-		reporter.Event(mb.Event{MetricSetFields: parsed})
+		reporter.Event(mb.Event{
+			ModuleFields: mapstr.M{
+				"node": mapstr.M{
+					"name": node.GetName(),
+					"host": node.GetHost().String(),
+				},
+			},
+			MetricSetFields: parsed,
+		})
 	}
 
 	return nil

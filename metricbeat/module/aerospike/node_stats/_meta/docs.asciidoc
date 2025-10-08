@@ -1,0 +1,1 @@
+This is the node_stats metricset of the module aerospike.

@@ -1,0 +1,10 @@
+- name: node_stats
+  type: group
+  release: beta
+  description: >
+    node_stats
+  fields:
+    - name: example
+      type: keyword
+      description: >
+        Example field

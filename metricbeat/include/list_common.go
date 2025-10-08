@@ -23,6 +23,7 @@ import (
 	// Import packages that perform 'func init()'.
 	_ "github.com/elastic/beats/v7/metricbeat/module/aerospike"
 	_ "github.com/elastic/beats/v7/metricbeat/module/aerospike/namespace"
+	_ "github.com/elastic/beats/v7/metricbeat/module/aerospike/node_stats"
 	_ "github.com/elastic/beats/v7/metricbeat/module/apache"
 	_ "github.com/elastic/beats/v7/metricbeat/module/apache/status"
 	_ "github.com/elastic/beats/v7/metricbeat/module/beat"
